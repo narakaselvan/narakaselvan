@@ -321,8 +321,15 @@ def All_gn_within_division_progress(gndivision_code):
 # Dashboard
 # --------------------------------------------------
 def assignments_dashboard():
-    st.title("Agriculture Census Progress Dashboard")
-
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: darkgreen; font-size: 30px;'>
+        📊 Assignments Management Progress
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
+  
     login = st.session_state.get("login")
     
     if not login:
@@ -363,7 +370,6 @@ def assignments_dashboard():
             df = district_progress(district)
         elif view=="Division":
             division =workingarea[:2]
-            st.write("district",division)
             df= All_Division_within_District_progress(division)
 
     elif level == "division":

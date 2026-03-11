@@ -1,26 +1,42 @@
 import streamlit as st
-from acsl.assignments.assign_progress import assign_progress
-
+from acsl.assignments.assign_progress import show_progress, sync_dashboard
+from acsl.assignments.block_assignments import block_assign
+from acsl.assignments.synch_assignments import synchronize
+from acsl.assignments.sync_status import sync_result
+from acsl.assignments.reassign_assignments import re_assign
+from acsl.assignments.custom_assignment import custom_assign
+from acsl.assignments.recall_assignments_from_interviewer import recall_blocks
 
 def show_assignments():
+
+    me = st.session_state.get("login")
 
     if "logged_in" not in st.session_state:
         st.error("User not logged in")
         st.stop()
 
-    sub_tabs=st.tabs(["Progress","Block_Assign", "Custom_Assign", "Re_Assign","Synchronize"])
+    sub_tabs=st.tabs(["Summary","Blocks", "Custom", "Reassign","Recall", "Synchronize", "Sync Progress","Sync Queue Monitor"])
 
     with sub_tabs[0]:
-        assign_progress()
+        show_progress(me)
 
     with sub_tabs[1]:
-        st.write("This is Block wise Assignment")
+        block_assign(me)
 
     with sub_tabs[2]:
-        st.write("This is custom Assignment")
+        custom_assign(me)
 
     with sub_tabs[3]:
-        st.write("This is Reassign Assignment")
+        re_assign(me)
 
     with sub_tabs[4]:
-        st.write("This is Synchronize the Assignment")
+        recall_blocks(me)
+
+    with sub_tabs[5]:
+        synchronize()
+
+    with sub_tabs[6]:
+        sync_result()
+
+    with sub_tabs[7]:
+        sync_dashboard(me)

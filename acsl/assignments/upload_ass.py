@@ -5,7 +5,15 @@ from psycopg2.extras import execute_batch
 from acsl.db import get_connection
 
 def upload_assignments():
-    st.title("📥 Bulk Assignments Uploader")
+
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
+        📥 Bulk Assignments Uploader
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
 
     # -------------------------------
     # REQUIRED COLUMNS

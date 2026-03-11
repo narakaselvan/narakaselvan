@@ -5,6 +5,10 @@ from acsl.users.add_users import add_user
 from acsl.users.edit_users import edit_user
 from acsl.assignments.download_ass import download_assignments
 from acsl.assignments.upload_ass import upload_assignments
+from acsl.assignments.Revert_assignments import retry_failed_jobs
+from acsl.assignments.sync_status import sync_result
+from acsl.assignments.supervisor_assignments_updated_summary import sync_dashboard
+
 
 def show_admin():
     st.markdown(
@@ -16,16 +20,28 @@ def show_admin():
     unsafe_allow_html=True
     )
 
-    sub_tabs = st.tabs(["Assignments", "Users", "Interviews"])
+    sub_tabs = st.tabs(["Assignments", "Users", "Interviews","Monitoring"])
 
     with sub_tabs[0]:
-        assign_sub_tabs = st.tabs(["Download Assignments", "Upload Assignments"])
+        assign_sub_tabs = st.tabs(["Prepare Assignments", "Upload to SuSo", "L-Form" ,"Download Assignments", "Upload to LocalDB", "Revert Assignments"])
 
         with assign_sub_tabs[0]:
-            download_assignments()
+            st.write("Prepare Assignments")
 
         with assign_sub_tabs[1]:
+            st.write("Upload to SuSo")
+
+        with assign_sub_tabs[2]:
+            st.write("L-Form")
+        
+        with assign_sub_tabs[3]:
+            download_assignments()
+
+        with assign_sub_tabs[4]:
             upload_assignments()
+
+        with assign_sub_tabs[5]:
+            retry_failed_jobs()
         
     with sub_tabs[1]:
         user_sub_tabs= st.tabs(["Single User", "Bulk User"])
@@ -47,3 +63,14 @@ def show_admin():
 
             with bulk_user_sub_tabs[1]:
                 create_users()
+
+    with sub_tabs[2]:
+        st.write("It is interviews control Tab")
+
+    with sub_tabs[3]:
+        monitoring_sub_tabs=st.tabs(["Sync Summary","Sync Details"])
+        with monitoring_sub_tabs[0]:
+            sync_dashboard()
+
+        with monitoring_sub_tabs[1]:
+            sync_result()
