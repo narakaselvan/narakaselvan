@@ -2,14 +2,22 @@
 import streamlit as st
 import os
 import time
+import zipfile
 from acsl.db import survey_solution_auth
 
 def show_download_interviews_from_SuSo():
-    st.title("📥 Survey Solutions Interview Downloader (HQ)")
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
+        📥 Survey Solutions Interview Downloader (HQ)
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
 
     # Inputs
-    questionnaire_variable = st.text_input("Questionnaire Variable", "SriLanka_AgCensus2025")
-    download_dir = st.text_input("Download Directory", "D:/Nonagri/Download")
+    questionnaire_variable = "SriLanka_AgCensus2025"
+    download_dir = "./interviews"
 
     if st.button("▶ Start Download"):
         os.makedirs(download_dir, exist_ok=True)
@@ -38,13 +46,12 @@ def show_download_interviews_from_SuSo():
                 st.error(f"❌ Questionnaire with variable '{questionnaire_variable}' not found.")
                 st.stop()
             
-            # FIXED: Extract both the GUID and the Version!
+            # Extract both the GUID and the Version
             q_guid = items[0]["QuestionnaireId"]
             q_version = items[0]["Version"]
             
             # Combine them using the $ symbol as required by the Export API
             full_q_id = f"{q_guid}${q_version}"
-            
             st.success(f"✅ Found Questionnaire: {full_q_id}")
             
         except Exception as e:
@@ -58,8 +65,8 @@ def show_download_interviews_from_SuSo():
         try:
             export_payload = {
                 "ExportType": "Tabular", 
-                "QuestionnaireId": full_q_id, # <-- Using the combined ID$Version
-                "InterviewStatus": "All" 
+                "QuestionnaireId": full_q_id, 
+                "InterviewStatus": "All" # You can change this to "ApprovedByHQ" etc.
             }
             
             url_export = f"{server}/{workspace}/api/v2/export"
@@ -105,7 +112,7 @@ def show_download_interviews_from_SuSo():
                 st.error(f"❌ Export failed on server with status: {status}")
                 st.stop()
                 
-            time.sleep(3) # Wait 3 seconds before checking again so we don't spam the server
+            time.sleep(3) # Wait 3 seconds before checking again
 
         # ---------------------------------------------------------
         # Step 4: Download the finalized ZIP file
@@ -116,20 +123,44 @@ def show_download_interviews_from_SuSo():
             r_file = session.get(download_url, stream=True)
             r_file.raise_for_status()
             
-            zip_path = os.path.join(download_dir, f"{questionnaire_variable}_export.zip")
+            zip_filename = f"{questionnaire_variable}_export.zip"
+            zip_path = os.path.join(download_dir, zip_filename)
+            
             with open(zip_path, "wb") as f:
                 for chunk in r_file.iter_content(chunk_size=8192):
                     f.write(chunk)
                     
-            st.success(f"✅ Success! Data downloaded and saved to {zip_path}")
+            st.success(f"✅ ZIP file downloaded to: {zip_path}")
             
+            # ---------------------------------------------------------
+            # Step 5: Automatically Unzip the Files
+            # ---------------------------------------------------------
+            st.info("📂 Extracting files...")
+            
+            # Create a specific folder for these extracted files
+            extract_path = os.path.join(download_dir, f"{questionnaire_variable}_extracted_data")
+            os.makedirs(extract_path, exist_ok=True)
+            
+            # Unzip everything into that folder
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_path)
+                
+            st.success(f"✅ Files successfully unzipped to: {extract_path}")
+            
+            # Display the names of the files we just extracted!
+            extracted_files = os.listdir(extract_path)
+            st.write("**📄 Extracted Data Files:**")
+            for file in extracted_files:
+                st.text(file)
+                
+            # Keep the Streamlit download button so the user can still grab the ZIP from the browser if they want
             st.download_button(
-                label="⬇ Download Final ZIP",
+                label="⬇ Download Final ZIP to Browser",
                 data=open(zip_path, "rb").read(),
-                file_name=os.path.basename(zip_path),
+                file_name=zip_filename,
                 mime="application/zip"
             )
             
         except Exception as e:
-            st.error(f"Error downloading file: {str(e)}")
+            st.error(f"Error downloading or extracting file: {str(e)}")
             st.stop()

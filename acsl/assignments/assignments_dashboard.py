@@ -1,397 +1,335 @@
 import streamlit as st
+import sys
+import os
 import pandas as pd
-from acsl.db import run_query
 
-# --------------------------------------------------
-# Detect administrative level from working area
-# --------------------------------------------------
-def detect_area_level(workingarea):
-    if workingarea == "0000000":
+# -------------------------------------------------
+# PATH FIX
+# -------------------------------------------------
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+from acsl.db import get_connection
+
+# -------------------------------------------------
+# WORKING AREA FUNCTIONS
+# -------------------------------------------------
+def normalize_working_area(wa):
+    if str(wa) == "0":
+        return "0000000"
+    return str(wa).zfill(7)
+
+def build_area_filter(current_wa):
+    current_wa = normalize_working_area(current_wa)
+    if current_wa == "0000000":
+        return "1=1", []
+    prefix = current_wa.rstrip("0")
+    return "workingarea LIKE %s", [prefix + "%"]
+
+# -------------------------------------------------
+# AREA LEVEL DETECTION
+# -------------------------------------------------
+def get_area_level(wa):
+    wa = normalize_working_area(wa)
+
+    if wa == "0000000":
         return "island"
-    if workingarea[1:] == "000000":
+    elif wa[1:] == "000000":
         return "province"
-    if workingarea[2:] == "00000":
+    elif wa[2:] == "00000":
         return "district"
-    if workingarea[4:] == "000":
+    elif wa[4:] == "000":
         return "division"
-    return "gndivision"
+    else:
+        return "gn"
 
-# --------------------------------------------------
-# Get user working area
-# --------------------------------------------------
-def get_user_workingarea(login):
-    result = run_query(
-        "SELECT workingarea FROM susouser WHERE LOWER(login)=LOWER(%s)",
-        (login,)
-    )
-    if not result:
-        st.error("User not found")
-        st.stop()
-    workingarea = str(result[0]["workingarea"])
-    if workingarea == "0":
-        workingarea = "0000000"
-    return workingarea
+def get_next_level_length(level):
+    mapping = {
+        "island": 1,
+        "province": 2,
+        "district": 4,
+        "division": 7
+    }
+    return mapping.get(level, 7)
 
-# --------------------------------------------------
-# Safe DataFrame conversion
-# --------------------------------------------------
-def to_df(result):
-    if not result:
-        return pd.DataFrame()
-    return pd.DataFrame(result)
-
-# --------------------------------------------------
-# Provincial Progress for working area 0000000
-# --------------------------------------------------
-def all_province_progress():
-    query = """
-    SELECT
-        LEFT(a.preload_a1b::text,1) AS province_code,
-        p.name AS province_name,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-    JOIN province p
-      ON p.code = LEFT(a.preload_a1b::text,1)
-    JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor', 'interviewer')
-    GROUP BY province_code, province_name
-    ORDER BY province_code;
-    """
-    return to_df(run_query(query))
-
-# --------------------------------------------------
-# All District Progress for working area 0000000
-# --------------------------------------------------
-def All_Dsitrict_progress():
-    query = """
-    SELECT
-        a.preload_a1b AS district_code,
-        a.preload_a1a AS district_name,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-    JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor', 'interviewer')
-    GROUP BY district_code, district_name
-    ORDER BY district_code;
-    """
-    return to_df(run_query(query))
-
-# --------------------------------------------------
-# particular province progress
-# --------------------------------------------------
-def province_progress(province_code):
-    query = """
-    SELECT
-        LEFT(a.preload_a1b::text,1) AS province_code,
-        p.name AS province_name,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-
-    JOIN province p
-      ON p.code = LEFT(a.preload_a1b::text,1)
-
-    JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor', 'interviewer')
-      AND LEFT(a.preload_a1b::text,1) = %s
-
-    GROUP BY province_code, province_name
-    ORDER BY province_code;
-    """
-    return to_df(run_query(query, (province_code,)))
-
-# --------------------------------------------------
-# All District within Province Progress
-# --------------------------------------------------
-def All_District_within_Province_progress(province_code):
-
-    query = """
-    SELECT
-        a.preload_a1b AS district_code,
-        a.preload_a1a AS district_name,
-        
-        COUNT(DISTINCT a.meta_id) AS total_assignments,
-        
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN 1 END) AS total_interviews_done,
-        
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN 1 END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN 1 END) AS assignments_with_supervisors,
-        
-        COUNT(CASE WHEN u.role='interviewer' THEN 1 END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-    JOIN susouser u
-        ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor','interviewer')
-      AND LEFT(a.preload_a1b::text,1) = %s
-
-    GROUP BY a.preload_a1b, a.preload_a1a
-    ORDER BY a.preload_a1b;
-    """
-
-    return to_df(run_query(query, (province_code,)))
-
-# --------------------------------------------------
-# District Progress
-# --------------------------------------------------
-def district_progress(district_code):
-
-    query = """
-    SELECT
-        a.preload_a1a AS district_name,
-        a.preload_a1b AS district_code,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-    JOIN susouser u
-      ON LEFT(u.workingarea::text,2) = LEFT(a.preload_a1b::text,2)
-      AND u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor','interviewer')
-      AND LEFT(a.preload_a1b::text,2) = %s
-
-    GROUP BY a.preload_a1a, a.preload_a1b
-    ORDER BY a.preload_a1a;
-    """
-
-    return to_df(run_query(query, (district_code,)))
-
-# --------------------------------------------------
-# All DIvisions within District Progress
-# --------------------------------------------------
-def All_Division_within_District_progress(district_code):
-
-    query = """
-    SELECT
-        a.preload_a2a AS division_name,
-        a.preload_a2b::text AS division_code,
-                
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-    LEFT JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE LEFT(u.workingarea::text,2) = LEFT(a.preload_a2b::text,2)
-      AND LEFT(a.preload_a2b::text,2) = %s::text
-
-    GROUP BY division_code, division_name
-    ORDER BY division_code;
-    """
-    return to_df(run_query(query, (district_code,)))
-# --------------------------------------------------
-# Division Progress
-# --------------------------------------------------
-def division_progress(division_code):
-    query = """
-    SELECT
-        a.preload_a2a AS division_name,
-        a.preload_a2b::text AS division_code,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-
-    JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor', 'interviewer')
-      AND LEFT(a.preload_a2b::text,4) = %s
-
-    GROUP BY division_code, division_name
-    ORDER BY division_code;
-    """
-    return to_df(run_query(query, (division_code,)))
-
-# --------------------------------------------------
-# GN Division Progress
-# --------------------------------------------------
-def All_gn_within_division_progress(gndivision_code):
-    query = """
-    SELECT
-        a.preload_a3a AS gndivision_name,
-        a.preload_a3b::text AS gndivision_code,
-        
-        COUNT(a.meta_id) AS total_assignments,
-        COUNT(CASE WHEN a.meta_interviewscount != 0 THEN a.meta_id END) AS total_interviews_done,
-        COUNT(CASE WHEN a.meta_receivedbytabletatutc IS NOT NULL THEN a.meta_id END) AS total_received,
-        
-        COUNT(DISTINCT CASE WHEN u.role='supervisor' THEN a.meta_responsiblename END) AS total_supervisors,
-        COUNT(DISTINCT CASE WHEN u.role='interviewer' THEN a.meta_responsiblename END) AS total_interviewers,
-        
-        COUNT(CASE WHEN u.role='supervisor' THEN a.meta_id END) AS assignments_with_supervisors,
-        COUNT(CASE WHEN u.role='interviewer' THEN a.meta_id END) AS assignments_with_interviewers,
-        
-        COUNT(DISTINCT a.preload_a0 || a.preload_a01) AS total_blocks
-
-    FROM assignments a
-
-    JOIN susouser u
-      ON u.login = a.meta_responsiblename
-
-    WHERE u.role IN ('supervisor', 'interviewer')
-      AND LEFT(a.preload_a3b::text,4) = %s
-
-    GROUP BY gndivision_code, gndivision_name
-    ORDER BY gndivision_code;
-    """
-    return to_df(run_query(query, (gndivision_code,)))
-
-# --------------------------------------------------
-# Dashboard
-# --------------------------------------------------
-def assignments_dashboard():
+# -------------------------------------------------
+# AREA-WISE PROGRESS
+# -------------------------------------------------
+def show_area_wise_progress(conn, current_wa):
     st.markdown(
     """
-    <h1 style='text-align: center; color: darkgreen; font-size: 30px;'>
-        📊 Assignments Management Progress
+    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
+        📊 Area-wise Progress
     </h1>
     """,
     unsafe_allow_html=True
     )
-  
-    login = st.session_state.get("login")
-    
-    if not login:
-        st.error("User not logged in")
-        return
-    
-    workingarea = get_user_workingarea(login)
-    level = detect_area_level(workingarea)
 
-    df = pd.DataFrame()
+    level = get_area_level(current_wa)
 
-    province = workingarea[0:2]
-
+    # --------------------------------------------
+    # LEVEL SELECTION
+    # --------------------------------------------
     if level == "island":
-
-        view = st.radio("View Progress", ["Province", "District"])
-
-        if view == "Province":
-            df = all_province_progress()
-        elif view == "District":
-            df = All_Dsitrict_progress()
-
-    elif level == "province":
-        view = st.radio("View Progress", ["Province", "District"])
-
-        if view == "Province":
-            province=workingarea[:1]
-            df = province_progress(province)
-        elif view == "District":
-            province=workingarea[:1]
-            df = All_District_within_Province_progress(province)
-
-    elif level == "district":
-        view = st.radio("View Progress", ["District", "Division"])
-        
-        if view =="District":
-            district = workingarea[:2]
-            df = district_progress(district)
-        elif view=="Division":
-            division =workingarea[:2]
-            df= All_Division_within_District_progress(division)
-
-    elif level == "division":
-        view = st.radio("View Progress", ["Division", "GN Division"])
-
-        if view == "Division":
-            division = workingarea[:4]
-            df = division_progress(division)
-        elif view == "GN Division":
-            gndivision=workingarea[:4]
-            df= All_gn_within_division_progress(gndivision)
-
+        view_option = st.selectbox(
+            "Select Summary Level",
+            ["Province Wise", "District Wise"]
+        )
+        prefix_len = 1 if view_option == "Province Wise" else 2
     else:
-        st.warning("GN level dashboard not available")
+        prefix_len = get_next_level_length(level)
 
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
+    # --------------------------------------------
+    # USERS
+    # --------------------------------------------
+    area_condition, area_params = build_area_filter(current_wa)
+
+    df_users = pd.read_sql(
+        f"SELECT login, role, workingarea FROM susouser WHERE {area_condition}",
+        conn, params=area_params
+    )
+
+    if df_users.empty:
+        st.warning("No data available")
+        return
+
+    df_users["role_clean"] = df_users["role"].str.lower().str.strip()
+    df_users["area_group"] = df_users["workingarea"].astype(str).str[:prefix_len]
+
+    # --------------------------------------------
+    # LOAD AREA NAMES
+    # --------------------------------------------
+    if prefix_len == 1:
+        df_names = pd.read_sql("SELECT code, name FROM province", conn)
+    elif prefix_len == 2:
+        df_names = pd.read_sql("SELECT code, name FROM district", conn)
+    elif prefix_len == 4:
+        df_names = pd.read_sql("SELECT code, name FROM division", conn)
+    elif prefix_len == 7:
+        df_names = pd.read_sql("SELECT code, name FROM gndivision", conn)
     else:
-        st.info("No data available.")
+        df_names = pd.DataFrame(columns=["code", "name"])
 
-# --------------------------------------------------
-# Run Dashboard
-# --------------------------------------------------
+    df_names["code"] = df_names["code"].astype(str)
+
+    # --------------------------------------------
+    # USER SUMMARY
+    # --------------------------------------------
+    summary = df_users.groupby("area_group").agg(
+        supervisors=("role_clean", lambda x: (x == "supervisor").sum()),
+        interviewers=("role_clean", lambda x: (x == "interviewer").sum())
+    ).reset_index()
+
+    # Merge names
+    summary = summary.merge(
+        df_names,
+        left_on="area_group",
+        right_on="code",
+        how="left"
+    )
+
+    summary.rename(columns={"name": "area_name"}, inplace=True)
+
+    # ❌ REMOVE UNKNOWN AREAS
+    summary = summary[summary["area_name"].notna()]
+
+    if summary.empty:
+        st.warning("No mapped areas found")
+        return
+
+    # --------------------------------------------
+    # KPI FUNCTION
+    # --------------------------------------------
+    def get_counts(area_prefix):
+        like_pattern = area_prefix + "%"
+
+        supervisors = pd.read_sql(
+            "SELECT login FROM susouser WHERE workingarea LIKE %s AND LOWER(role)='supervisor'",
+            conn, params=[like_pattern]
+        )["login"].tolist()
+
+        interviewers = pd.read_sql(
+            "SELECT login FROM susouser WHERE workingarea LIKE %s AND LOWER(role)='interviewer'",
+            conn, params=[like_pattern]
+        )["login"].tolist()
+
+        sup_assignments = 0
+        if supervisors:
+            sup_assignments = pd.read_sql("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT ON (assignment__id) assignment__id
+                    FROM assignment__actions
+                    WHERE responsible__name = ANY(%s)
+                    ORDER BY assignment__id,
+                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+                ) t
+            """, conn, params=(supervisors,)).iloc[0,0]
+
+        received = 0
+        if interviewers:
+            received = pd.read_sql("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT ON (assignment__id) assignment__id
+                    FROM assignment__actions
+                    WHERE action = '4'
+                    AND responsible__name = ANY(%s)
+                    ORDER BY assignment__id,
+                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+                ) t
+            """, conn, params=(interviewers,)).iloc[0,0]
+
+        reassigned = 0
+        if supervisors:
+            reassigned = pd.read_sql("""
+                SELECT COUNT(*) FROM (
+                    SELECT DISTINCT ON (assignment__id) assignment__id
+                    FROM assignment__actions
+                    WHERE action = '7'
+                    AND originator = ANY(%s)
+                    ORDER BY assignment__id,
+                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+                ) t
+            """, conn, params=(supervisors,)).iloc[0,0]
+
+        return sup_assignments, received, reassigned
+
+    # --------------------------------------------
+    # BUILD RESULT
+    # --------------------------------------------
+    results = []
+    for _, row in summary.iterrows():
+        area = row["area_group"]
+        area_name = row["area_name"]
+
+        sup_assign, rec, reas = get_counts(area)
+
+        results.append({
+            "Area Code": area,
+            "Area Name": area_name,
+            "Supervisors": row["supervisors"],
+            "Interviewers": row["interviewers"],
+            "Assignments (Sup)": sup_assign,
+            "Received (Int)": rec,
+            "Reassigned": reas
+        })
+
+    df_result = pd.DataFrame(results)
+
+    # --------------------------------------------
+    # TOTAL ROW
+    # --------------------------------------------
+    total_values = df_result.select_dtypes(include='number').sum()
+    total_row = pd.DataFrame([total_values])
+    total_row["Area Code"] = ""
+    total_row["Area Name"] = "TOTAL"
+
+    df_result = pd.concat([df_result, total_row], ignore_index=True)
+
+    # --------------------------------------------
+    # DISPLAY
+    # --------------------------------------------
+    st.dataframe(df_result, use_container_width=True)
+
+# -------------------------------------------------
+# MAIN DASHBOARD
+# -------------------------------------------------
+def show_assignment_dashboard():
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
+        📊 Assignment Monitoring Dashboard
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
+
+    conn = get_connection()
+    current_user = st.session_state.get("user")
+
+    df_user = pd.read_sql(
+        "SELECT workingarea, role FROM susouser WHERE login = %s",
+        conn, params=[current_user]
+    )
+
+    if df_user.empty:
+        st.error("User not found")
+        st.stop()
+
+    current_wa = df_user.iloc[0]["workingarea"]
+    current_role = df_user.iloc[0]["role"]
+
+    #st.sidebar.success(f"👤 {current_user} ({current_role})")
+
+    area_condition, area_params = build_area_filter(current_wa)
+
+    df_users = pd.read_sql(
+        f"SELECT login, role FROM susouser WHERE {area_condition}",
+        conn, params=area_params
+    )
+
+    df_users["role_clean"] = df_users["role"].str.lower().str.strip()
+
+    supervisors = df_users[df_users["role_clean"] == "supervisor"]["login"].tolist()
+    interviewers = df_users[df_users["role_clean"] == "interviewer"]["login"].tolist()
+
+    supervisor_count = 1 if current_role.lower() == "supervisor" else len(supervisors)
+    interviewer_count = len(interviewers)
+
+    sup_assignments = 0
+    if supervisors:
+        sup_assignments = pd.read_sql("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT ON (assignment__id) assignment__id
+                FROM assignment__actions
+                WHERE responsible__name = ANY(%s)
+                ORDER BY assignment__id,
+                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+            ) t
+        """, conn, params=(supervisors,)).iloc[0,0]
+
+    assigned_to_int = 0
+    received_int = 0
+
+    if interviewers:
+        assigned_to_int = pd.read_sql("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT ON (assignment__id) assignment__id
+                FROM assignment__actions
+                WHERE action = '4'
+                AND responsible__name = ANY(%s)
+                ORDER BY assignment__id,
+                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+            ) t
+        """, conn, params=(interviewers,)).iloc[0,0]
+
+        received_int = assigned_to_int
+
+    reassigned = 0
+    if supervisors:
+        reassigned = pd.read_sql("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT ON (assignment__id) assignment__id
+                FROM assignment__actions
+                WHERE action = '7'
+                AND originator = ANY(%s)
+                ORDER BY assignment__id,
+                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
+            ) t
+        """, conn, params=(supervisors,)).iloc[0,0]
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("👨‍💼 Supervisors", supervisor_count)
+    col2.metric("🧑‍💻 Interviewers", interviewer_count)
+    col3.metric("📦 Assignments with Supervisors", sup_assignments)
+
+    col4, col5, col6 = st.columns(3)
+    col4.metric("📤 Assigned to Interviewers", assigned_to_int)
+    col5.metric("📥 Received by Interviewers", received_int)
+    col6.metric("🔁 Reassigned Assignments", reassigned)
+
+    # NEW FEATURE
+    show_area_wise_progress(conn, current_wa)
+
+# -------------------------------------------------
+# RUN
+# -------------------------------------------------
 if __name__ == "__main__":
-    assignments_dashboard()
+    show_assignment_dashboard()
