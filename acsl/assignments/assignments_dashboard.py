@@ -17,316 +17,233 @@ def normalize_working_area(wa):
         return "0000000"
     return str(wa).zfill(7)
 
-def build_area_filter(current_wa):
-    current_wa = normalize_working_area(current_wa)
-    if current_wa == "0000000":
-        return "1=1", []
-    prefix = current_wa.rstrip("0")
-    return "workingarea LIKE %s", [prefix + "%"]
-
-# -------------------------------------------------
-# AREA LEVEL DETECTION
-# -------------------------------------------------
 def get_area_level(wa):
     wa = normalize_working_area(wa)
-
-    if wa == "0000000":
-        return "island"
-    elif wa[1:] == "000000":
-        return "province"
-    elif wa[2:] == "00000":
-        return "district"
-    elif wa[4:] == "000":
-        return "division"
-    else:
-        return "gn"
+    if wa == "0000000": return "island"
+    elif wa[1:] == "000000": return "province"
+    elif wa[2:] == "00000": return "district"
+    elif wa[4:] == "000": return "division"
+    else: return "gn"
 
 def get_next_level_length(level):
-    mapping = {
-        "island": 1,
-        "province": 2,
-        "district": 4,
-        "division": 7
-    }
+    mapping = {"island": 1, "province": 2, "district": 4, "division": 7}
     return mapping.get(level, 7)
 
 # -------------------------------------------------
-# AREA-WISE PROGRESS
+# FETCH DATA EFFICIENTLY (SINGLE DATABASE HIT)
 # -------------------------------------------------
-def show_area_wise_progress(conn, current_wa):
-    st.markdown(
-    """
-    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
-        📊 Area-wise Progress
-    </h1>
-    """,
-    unsafe_allow_html=True
-    )
+@st.cache_data(show_spinner=False, ttl=60)
+def fetch_dashboard_data(prefix):
+    conn = get_connection()
+    try:
+        # 1. Fetch Users
+        sql_users = """
+        SELECT login, LOWER(role) AS role, workingarea 
+        FROM susouser 
+        WHERE workingarea LIKE %(prefix)s || '%%' OR %(prefix)s = ''
+        """
+        df_users = pd.read_sql(sql_users, conn, params={'prefix': prefix})
 
-    level = get_area_level(current_wa)
-
-    # --------------------------------------------
-    # LEVEL SELECTION
-    # --------------------------------------------
-    if level == "island":
-        view_option = st.selectbox(
-            "Select Summary Level",
-            ["Province Wise", "District Wise"]
+        # 2. Fetch Assignments (STRICTLY FROM assignments TABLE)
+        sql_assign = """
+        WITH LatestAssign AS (
+            -- Get the absolute latest status and owner of the assignment
+            SELECT assignment__id, responsible__name, action,
+                   ROW_NUMBER() OVER(PARTITION BY assignment__id ORDER BY "date" DESC, "time" DESC) as rn
+            FROM assignment__actions
+            WHERE responsible__name IS NOT NULL AND TRIM(responsible__name) != ''
+        ),
+        ReassignedStats AS (
+            -- Check if it was ever reassigned by a supervisor (Action 7)
+            SELECT DISTINCT aa.assignment__id 
+            FROM assignment__actions aa
+            JOIN susouser su ON aa.originator = su.login
+            WHERE aa.action = '7' AND LOWER(su.role) = 'supervisor'
         )
-        prefix_len = 1 if view_option == "Province Wise" else 2
-    else:
-        prefix_len = get_next_level_length(level)
+        SELECT 
+            a.meta_id AS assignment_id, 
+            LOWER(su.role) AS current_role,
+            la.action AS latest_action,
+            su.workingarea,
+            CASE WHEN rs.assignment__id IS NOT NULL THEN 1 ELSE 0 END AS is_reassigned
+        FROM assignments a
+        -- INNER JOIN ensures we ONLY count assignments that physically exist in the assignments table
+        JOIN LatestAssign la ON a.meta_id::VARCHAR = la.assignment__id::VARCHAR AND la.rn = 1
+        JOIN susouser su ON la.responsible__name = su.login
+        LEFT JOIN ReassignedStats rs ON a.meta_id::VARCHAR = rs.assignment__id::VARCHAR
+        WHERE su.workingarea LIKE %(prefix)s || '%%' OR %(prefix)s = ''
+        """
+        df_assign = pd.read_sql(sql_assign, conn, params={'prefix': prefix})
+        
+        # 3. Fetch Area Names based on the required tables
+        names_dict = {
+            1: pd.read_sql("SELECT code::VARCHAR, name FROM province", conn),
+            2: pd.read_sql("SELECT code::VARCHAR, name FROM district", conn),
+            4: pd.read_sql("SELECT code::VARCHAR, name FROM division", conn),
+            7: pd.read_sql("SELECT code::VARCHAR, name FROM gndivision", conn)
+        }
+        
+        return df_users, df_assign, names_dict
+    finally:
+        conn.close()
 
-    # --------------------------------------------
-    # USERS
-    # --------------------------------------------
-    area_condition, area_params = build_area_filter(current_wa)
-
-    df_users = pd.read_sql(
-        f"SELECT login, role, workingarea FROM susouser WHERE {area_condition}",
-        conn, params=area_params
-    )
-
-    if df_users.empty:
-        st.warning("No data available")
-        return
-
-    df_users["role_clean"] = df_users["role"].str.lower().str.strip()
-    df_users["area_group"] = df_users["workingarea"].astype(str).str[:prefix_len]
-
-    # --------------------------------------------
-    # LOAD AREA NAMES
-    # --------------------------------------------
-    if prefix_len == 1:
-        df_names = pd.read_sql("SELECT code, name FROM province", conn)
-    elif prefix_len == 2:
-        df_names = pd.read_sql("SELECT code, name FROM district", conn)
-    elif prefix_len == 4:
-        df_names = pd.read_sql("SELECT code, name FROM division", conn)
-    elif prefix_len == 7:
-        df_names = pd.read_sql("SELECT code, name FROM gndivision", conn)
-    else:
-        df_names = pd.DataFrame(columns=["code", "name"])
-
-    df_names["code"] = df_names["code"].astype(str)
-
-    # --------------------------------------------
-    # USER SUMMARY
-    # --------------------------------------------
-    summary = df_users.groupby("area_group").agg(
-        supervisors=("role_clean", lambda x: (x == "supervisor").sum()),
-        interviewers=("role_clean", lambda x: (x == "interviewer").sum())
-    ).reset_index()
-
-    # Merge names
-    summary = summary.merge(
-        df_names,
-        left_on="area_group",
-        right_on="code",
-        how="left"
-    )
-
-    summary.rename(columns={"name": "area_name"}, inplace=True)
-
-    # ❌ REMOVE UNKNOWN AREAS
-    summary = summary[summary["area_name"].notna()]
-
-    if summary.empty:
-        st.warning("No mapped areas found")
-        return
-
-    # --------------------------------------------
-    # KPI FUNCTION
-    # --------------------------------------------
-    def get_counts(area_prefix):
-        like_pattern = area_prefix + "%"
-
-        supervisors = pd.read_sql(
-            "SELECT login FROM susouser WHERE workingarea LIKE %s AND LOWER(role)='supervisor'",
-            conn, params=[like_pattern]
-        )["login"].tolist()
-
-        interviewers = pd.read_sql(
-            "SELECT login FROM susouser WHERE workingarea LIKE %s AND LOWER(role)='interviewer'",
-            conn, params=[like_pattern]
-        )["login"].tolist()
-
-        sup_assignments = 0
-        if supervisors:
-            sup_assignments = pd.read_sql("""
-                SELECT COUNT(*) FROM (
-                    SELECT DISTINCT ON (assignment__id) assignment__id
-                    FROM assignment__actions
-                    WHERE responsible__name = ANY(%s)
-                    ORDER BY assignment__id,
-                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-                ) t
-            """, conn, params=(supervisors,)).iloc[0,0]
-
-        received = 0
-        if interviewers:
-            received = pd.read_sql("""
-                SELECT COUNT(*) FROM (
-                    SELECT DISTINCT ON (assignment__id) assignment__id
-                    FROM assignment__actions
-                    WHERE action = '4'
-                    AND responsible__name = ANY(%s)
-                    ORDER BY assignment__id,
-                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-                ) t
-            """, conn, params=(interviewers,)).iloc[0,0]
-
-        reassigned = 0
-        if supervisors:
-            reassigned = pd.read_sql("""
-                SELECT COUNT(*) FROM (
-                    SELECT DISTINCT ON (assignment__id) assignment__id
-                    FROM assignment__actions
-                    WHERE action = '7'
-                    AND originator = ANY(%s)
-                    ORDER BY assignment__id,
-                    (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-                ) t
-            """, conn, params=(supervisors,)).iloc[0,0]
-
-        return sup_assignments, received, reassigned
-
-    # --------------------------------------------
-    # BUILD RESULT
-    # --------------------------------------------
-    results = []
-    for _, row in summary.iterrows():
-        area = row["area_group"]
-        area_name = row["area_name"]
-
-        sup_assign, rec, reas = get_counts(area)
-
-        results.append({
-            "Area Code": area,
-            "Area Name": area_name,
-            "Supervisors": row["supervisors"],
-            "Interviewers": row["interviewers"],
-            "Assignments (Sup)": sup_assign,
-            "Received (Int)": rec,
-            "Reassigned": reas
-        })
-
-    df_result = pd.DataFrame(results)
-
-    # --------------------------------------------
-    # TOTAL ROW
-    # --------------------------------------------
-    total_values = df_result.select_dtypes(include='number').sum()
-    total_row = pd.DataFrame([total_values])
-    total_row["Area Code"] = ""
-    total_row["Area Name"] = "TOTAL"
-
-    df_result = pd.concat([df_result, total_row], ignore_index=True)
-
-    # --------------------------------------------
-    # DISPLAY
-    # --------------------------------------------
-    st.dataframe(df_result, use_container_width=True)
 
 # -------------------------------------------------
 # MAIN DASHBOARD
 # -------------------------------------------------
 def show_assignment_dashboard():
     st.markdown(
-    """
-    <h1 style='text-align: center; color: darkgreen; font-size: 20px;'>
-        📊 Assignment Monitoring Dashboard
-    </h1>
-    """,
-    unsafe_allow_html=True
+        """
+        <h1 style='text-align: center; color: darkgreen; font-size: 24px;'>
+            📊 Assignment Monitoring Dashboard
+        </h1>
+        <hr>
+        """,
+        unsafe_allow_html=True
     )
 
+    current_user = st.session_state.get("login") # Assuming session state holds 'login'
+    if not current_user:
+        st.warning("Please login first.")
+        return
+
+    # Fetch Logged-in User's Area
     conn = get_connection()
-    current_user = st.session_state.get("user")
-
-    df_user = pd.read_sql(
-        "SELECT workingarea, role FROM susouser WHERE login = %s",
-        conn, params=[current_user]
-    )
+    try:
+        df_user = pd.read_sql("SELECT workingarea, role FROM susouser WHERE login = %s", conn, params=[current_user])
+    finally:
+        conn.close()
 
     if df_user.empty:
-        st.error("User not found")
-        st.stop()
+        st.error("User not found in database.")
+        return
 
-    current_wa = df_user.iloc[0]["workingarea"]
-    current_role = df_user.iloc[0]["role"]
+    current_wa = normalize_working_area(df_user.iloc[0]["workingarea"])
+    current_role = str(df_user.iloc[0]["role"]).lower().strip()
 
-    #st.sidebar.success(f"👤 {current_user} ({current_role})")
+    # Determine Prefix
+    if current_wa == "0000000":
+        prefix = ""
+    else:
+        prefix = current_wa.rstrip("0")
 
-    area_condition, area_params = build_area_filter(current_wa)
+    # Determine Level length for grouping
+    level = get_area_level(current_wa)
+    if level == "island":
+        view_option = st.selectbox("🌍 Select Summary Level", ["Province Wise", "District Wise"])
+        prefix_len = 1 if view_option == "Province Wise" else 2
+    else:
+        prefix_len = get_next_level_length(level)
 
-    df_users = pd.read_sql(
-        f"SELECT login, role FROM susouser WHERE {area_condition}",
-        conn, params=area_params
-    )
+    # --- FETCH DATA ---
+    with st.spinner("Calculating assignment metrics..."):
+        df_users, df_assign, names_dict = fetch_dashboard_data(prefix)
 
-    df_users["role_clean"] = df_users["role"].str.lower().str.strip()
+    # If no data exists, stop gracefully
+    if df_assign.empty and df_users.empty:
+        st.info("No users or assignments found for this working area.")
+        return
 
-    supervisors = df_users[df_users["role_clean"] == "supervisor"]["login"].tolist()
-    interviewers = df_users[df_users["role_clean"] == "interviewer"]["login"].tolist()
+    # --- PREPARE DATA GROUPING ---
+    df_users["area_group"] = df_users["workingarea"].astype(str).str[:prefix_len]
+    df_assign["area_group"] = df_assign["workingarea"].astype(str).str[:prefix_len]
 
-    supervisor_count = 1 if current_role.lower() == "supervisor" else len(supervisors)
-    interviewer_count = len(interviewers)
+    # Aggregate Users
+    summary_users = df_users.groupby("area_group").agg(
+        Supervisors=("role", lambda x: (x == "supervisor").sum()),
+        Interviewers=("role", lambda x: (x == "interviewer").sum())
+    ).reset_index()
 
-    sup_assignments = 0
-    if supervisors:
-        sup_assignments = pd.read_sql("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT ON (assignment__id) assignment__id
-                FROM assignment__actions
-                WHERE responsible__name = ANY(%s)
-                ORDER BY assignment__id,
-                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-            ) t
-        """, conn, params=(supervisors,)).iloc[0,0]
+    # Aggregate Assignments
+    df_assign['Assign_Sup'] = (df_assign['current_role'] == 'supervisor').astype(int)
+    df_assign['Assign_Int'] = (df_assign['current_role'] == 'interviewer').astype(int)
+    df_assign['Received_Int'] = ((df_assign['current_role'] == 'interviewer') & (df_assign['latest_action'] == '4')).astype(int)
+    
+    summary_assign = df_assign.groupby("area_group").agg(
+        Assignments_Sup=("Assign_Sup", "sum"),
+        Assigned_to_Int=("Assign_Int", "sum"),
+        Received_by_Int=("Received_Int", "sum"),
+        Reassigned=("is_reassigned", "sum")
+    ).reset_index()
 
-    assigned_to_int = 0
-    received_int = 0
+    # Merge everything together
+    df_result = pd.merge(summary_users, summary_assign, on="area_group", how="outer").fillna(0)
 
-    if interviewers:
-        assigned_to_int = pd.read_sql("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT ON (assignment__id) assignment__id
-                FROM assignment__actions
-                WHERE action = '4'
-                AND responsible__name = ANY(%s)
-                ORDER BY assignment__id,
-                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-            ) t
-        """, conn, params=(interviewers,)).iloc[0,0]
+    # Attach the proper Area Names
+    df_names = names_dict.get(prefix_len, pd.DataFrame(columns=["code", "name"]))
+    df_result = df_result.merge(df_names, left_on="area_group", right_on="code", how="left")
+    
+    # Clean up table columns
+    df_result.rename(columns={"name": "Area Name", "area_group": "Area Code"}, inplace=True)
+    df_result = df_result.dropna(subset=["Area Name"]) # Remove unmapped areas
+    
+    # Force integers
+    cols_to_int = ["Supervisors", "Interviewers", "Assignments_Sup", "Assigned_to_Int", "Received_by_Int", "Reassigned"]
+    df_result[cols_to_int] = df_result[cols_to_int].astype(int)
 
-        received_int = assigned_to_int
+    # Rename final columns for display
+    df_result.rename(columns={
+        "Assignments_Sup": "Assignments (Sup)",
+        "Assigned_to_Int": "Assigned (Int)",
+        "Received_by_Int": "Received (Int)"
+    }, inplace=True)
+    
+    df_result = df_result[["Area Code", "Area Name", "Supervisors", "Interviewers", "Assignments (Sup)", "Assigned (Int)", "Received (Int)", "Reassigned"]]
 
-    reassigned = 0
-    if supervisors:
-        reassigned = pd.read_sql("""
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT ON (assignment__id) assignment__id
-                FROM assignment__actions
-                WHERE action = '7'
-                AND originator = ANY(%s)
-                ORDER BY assignment__id,
-                (TO_DATE(date, 'YYYY-MM-DD') + time::time) DESC
-            ) t
-        """, conn, params=(supervisors,)).iloc[0,0]
+    # --- CALCULATE TOP LEVEL KPIs ---
+    tot_sup = int(df_result["Supervisors"].sum())
+    tot_int = int(df_result["Interviewers"].sum())
+    tot_a_sup = int(df_result["Assignments (Sup)"].sum())
+    tot_a_int = int(df_result["Assigned (Int)"].sum())
+    tot_r_int = int(df_result["Received (Int)"].sum())
+    tot_reass = int(df_result["Reassigned"].sum())
 
+    # Adjust supervisor count if the logged-in user is a supervisor (matching original logic)
+    display_sup_count = 1 if current_role == "supervisor" else tot_sup
+
+    # --- RENDER KPI METRICS ---
     col1, col2, col3 = st.columns(3)
-    col1.metric("👨‍💼 Supervisors", supervisor_count)
-    col2.metric("🧑‍💻 Interviewers", interviewer_count)
-    col3.metric("📦 Assignments with Supervisors", sup_assignments)
+    col1.metric("👨‍💼 Supervisors", display_sup_count)
+    col2.metric("🧑‍💻 Interviewers", tot_int)
+    col3.metric("📦 Assignments w/ Supervisors", tot_a_sup)
 
     col4, col5, col6 = st.columns(3)
-    col4.metric("📤 Assigned to Interviewers", assigned_to_int)
-    col5.metric("📥 Received by Interviewers", received_int)
-    col6.metric("🔁 Reassigned Assignments", reassigned)
+    col4.metric("📤 Assigned to Interviewers", tot_a_int)
+    col5.metric("📥 Received by Interviewers", tot_r_int)
+    col6.metric("🔁 Reassigned Assignments", tot_reass)
 
-    # NEW FEATURE
-    show_area_wise_progress(conn, current_wa)
+    st.markdown("---")
+
+    # --- RENDER DATAFRAME ---
+    st.markdown(
+        """
+        <h3 style='text-align: left; color: #2c3e50; font-size: 18px;'>
+            📍 Area-Wise Breakdown
+        </h3>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Append Total Row
+    total_row = pd.DataFrame([{
+        "Area Code": "",
+        "Area Name": "TOTAL",
+        "Supervisors": tot_sup,
+        "Interviewers": tot_int,
+        "Assignments (Sup)": tot_a_sup,
+        "Assigned (Int)": tot_a_int,
+        "Received (Int)": tot_r_int,
+        "Reassigned": tot_reass
+    }])
+    df_display = pd.concat([df_result, total_row], ignore_index=True)
+
+    # Highlight the last row (Total)
+    def highlight_total(s):
+        if s.name == len(df_display) - 1:
+            return ['font-weight: bold; background-color: #f8f9fa'] * len(s)
+        return [''] * len(s)
+
+    st.dataframe(df_display.style.apply(highlight_total, axis=1), use_container_width=True, hide_index=True)
 
 # -------------------------------------------------
 # RUN

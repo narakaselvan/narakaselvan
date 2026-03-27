@@ -1,1 +1,17 @@
 ﻿interview__key	interview__id	roster	id1	id2	variable	type	message__number	message
+02-94-78-82	bd5c4d0cf0e74f8d8e053e2d5179881a				Q4_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q4_0. Please correct Q1_3b or Q4_0
+02-94-78-82	bd5c4d0cf0e74f8d8e053e2d5179881a				Q6_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q6_0. Please correct Q1_3b or Q6_0
+02-94-78-82	bd5c4d0cf0e74f8d8e053e2d5179881a				Q9_4	2	1	"Please answer ""Yes"" or ""No"" for all types of machinery."
+03-33-69-12	1919d173192c4e39bd218c66e2264d5d				Q2_3_1	2	1	The number of household members listed does not match the total number reported in 2.2.5. Please check both answers.
+03-33-69-12	1919d173192c4e39bd218c66e2264d5d				Q2_3_1	2	2	The first member you list must be the holder, %HOLDER%. Please correct or check the name spelling.
+99-84-08-27	632a3811a8e24a06baffa0e6a7464927				Q4_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q4_0. Please correct Q1_3b or Q4_0
+99-84-08-27	632a3811a8e24a06baffa0e6a7464927				Q9_4	2	1	"Please answer ""Yes"" or ""No"" for all types of machinery."
+90-30-79-33	793d8c7cbc0a48209820f6f42d79b502				Q2_1_4	2	1	It is unlikely the holder is over 100 years old. Please confirm.
+90-30-79-33	793d8c7cbc0a48209820f6f42d79b502				Q2_4	2	1	"Cannot select code ""No other economic activities"" with any other code."
+90-30-79-33	793d8c7cbc0a48209820f6f42d79b502				Q4_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q4_0. Please correct Q1_3b or Q4_0
+90-30-79-33	793d8c7cbc0a48209820f6f42d79b502				Q6_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q6_0. Please correct Q1_3b or Q6_0
+97-94-78-51	ba68e7aba71e4817bf684ed94783eed7				Q3_4	2	1	The number of parcels listed does not match the number reported in 3.1. Please check both answers.
+62-32-09-54	bb1050cd9dfb49d499c88f80666c0bf6				Q2_4	2	1	"Cannot select code ""No other economic activities"" with any other code."
+62-32-09-54	bb1050cd9dfb49d499c88f80666c0bf6				Q4_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q4_0. Please correct Q1_3b or Q4_0
+62-32-09-54	bb1050cd9dfb49d499c88f80666c0bf6				Q6_0	2	1	Q1_3b indicated no crops grown. But crops grown at Q6_0. Please correct Q1_3b or Q6_0
+62-32-09-54	bb1050cd9dfb49d499c88f80666c0bf6				Q9_4	2	1	"Please answer ""Yes"" or ""No"" for all types of machinery."

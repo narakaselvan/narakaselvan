@@ -1,2 +1,11 @@
 ﻿interview__key	interview__id	roster	id1	id2	variable	order	date	time	originator	role	comment
 41-92-15-07	5034cf7f76dc402f88f83969c3185a85				@@Completed	1	2026-03-21	08:24:27	ayoo02	1	This is testing data
+70-52-54-83	45f01552ccdb474c8adb62d784295e10				@@RejectedBySupervisor	1	2026-03-22	14:28:51	dhanu01	2	Your Interview has errors please rectify errors
+90-30-79-33	793d8c7cbc0a48209820f6f42d79b502				@@RejectedBySupervisor	1	2026-03-24	04:34:18	siva	5	please correct the errors
+97-94-78-51	ba68e7aba71e4817bf684ed94783eed7				@@RejectedBySupervisor	1	2026-03-24	04:34:18	siva	5	Please correct all errors in the interview
+46-93-09-28	3dde27ac27c24fb4b2bcf16dfbc58da1				@@RejectedBySupervisor	1	2026-03-24	11:06:14	siva	5	Rejected due to unanswered/blank questions found during bulk block review. Please complete all required fields.
+62-32-09-54	bb1050cd9dfb49d499c88f80666c0bf6				@@RejectedBySupervisor	1	2026-03-24	11:06:16	siva	5	Rejected due to unanswered/blank questions found during bulk block review. Please complete all required fields.
+79-03-11-37	b2b7f4af9a1c4b909421c3038a5f52b3				@@RejectedBySupervisor	1	2026-03-24	11:06:17	siva	5	Rejected due to unanswered/blank questions found during bulk block review. Please complete all required fields.
+97-89-22-69	0c5999a356d34863a24468a67af74442				@@RejectedBySupervisor	1	2026-03-24	11:06:17	siva	5	Rejected due to unanswered/blank questions found during bulk block review. Please complete all required fields.
+99-84-08-27	632a3811a8e24a06baffa0e6a7464927				@@RejectedBySupervisor	1	2026-03-24	11:06:18	siva	5	Rejected due to unanswered/blank questions found during bulk block review. Please complete all required fields.
+03-33-69-12	1919d173192c4e39bd218c66e2264d5d				@@RejectedBySupervisor	1	2026-03-24	11:19:09	siva	5	Rejected due to validation errors during bulk block review.

@@ -3,15 +3,10 @@ from acsl.config import ROLE_HIERARCHY
 from acsl.services.user_services import validate_password, hash_password, normalize_workingarea
 
 def parse_workingarea(area):
-    """
-    Remove trailing zeros and determine hierarchy level
-    """
-    if not area:
-        return {"level": 0}
-
+    if not area: return {"level": 0}
     area_stripped = area.rstrip("0")
     return {
-        "level": len(area_stripped),  # 1=Province, 2=District, 4=Division, 7=GN
+        "level": len(area_stripped), 
         "province": area_stripped[:1] if len(area_stripped) >= 1 else None,
         "district": area_stripped[:2] if len(area_stripped) >= 2 else None,
         "division": area_stripped[:4] if len(area_stripped) >= 4 else None
@@ -24,15 +19,20 @@ def edit_user():
 
     creator_area = st.session_state.workingarea
     creator_role = st.session_state.role.lower()
-
     roles_lower = [r.lower() for r in ROLE_HIERARCHY]
-    current_index = roles_lower.index(creator_role)
 
-    # Determine the next editable role only
-    if current_index + 1 < len(ROLE_HIERARCHY):
-        next_role = ROLE_HIERARCHY[current_index + 1]
+    # Handle Admin logic specifically
+    if creator_role == "admin":
+        next_role = ROLE_HIERARCHY[0]
+    elif creator_role in roles_lower:
+        current_index = roles_lower.index(creator_role)
+        if current_index + 1 < len(ROLE_HIERARCHY):
+            next_role = ROLE_HIERARCHY[current_index + 1]
+        else:
+            next_role = None  
     else:
-        next_role = None  # No role below current
+        st.error(f"Role '{creator_role}' is not authorized to edit users.")
+        return
 
     # -----------------------------
     # SEARCH USER
@@ -53,16 +53,16 @@ def edit_user():
     user = user_list[0]
 
     # -----------------------------
-    # NEXT LEVEL ROLE CHECK
+    # ROLE CHECK
     # -----------------------------
     if next_role is None or user["role"].lower() != next_role.lower():
-        st.error(f"No users found in your working area with editable role '{next_role}'.")
+        st.error(f"No users found in your scope with editable role '{next_role}'.")
         return
 
     # -----------------------------
     # WORKING AREA CHECK
     # -----------------------------
-    if creator_role != "headquarters":
+    if creator_role not in ["headquarters", "admin"]:
         creator_info = parse_workingarea(creator_area)
         if not user["workingarea"].startswith(creator_area.rstrip("0")[:creator_info["level"]]):
             st.error("User outside your working area")
@@ -78,69 +78,63 @@ def edit_user():
     workspace = st.text_input("Workplace", value=user["workspace"], key="edit_workspace")
 
     # -----------------------------
-    # USER STATUS
+    # USER STATUS & PASSWORD
     # -----------------------------
     st.markdown("### User Status")
     is_active = st.toggle("Active User", value=bool(user["is_active"]), key="edit_is_active")
 
-    # -----------------------------
-    # PASSWORD CHANGE
-    # -----------------------------
     st.markdown("### Change Password (optional)")
+    st.info("💡 Note: Changing the password here only updates the local dashboard. The Survey Solutions password must be changed in HQ.")
     password = st.text_input("New Password", type="password", key="edit_password")
     confirm = st.text_input("Re-enter Password", type="password", key="edit_confirm_password")
 
     # -----------------------------
-    # WORKING AREA SELECTION (Next Level Only)
+    # WORKING AREA SELECTION 
     # -----------------------------
     st.markdown("### Working Area")
-    selected_codes = []
+    st.info(f"Current assigned area code: **{user['workingarea']}**")
+    
+    selected_code = None
 
-    if creator_role == "headquarters":
-        # HQ selects provinces
+    if creator_role == "admin":
+        st.info("🌍 National Level (0000000) - Fixed for Headquarters.")
+        selected_code = "0000000"
+
+    elif creator_role == "headquarters":
         provinces = user_query("SELECT code,name FROM province ORDER BY name", fetch=True)
         province_dict = {r["name"]: r["code"] for r in provinces}
-        selected_names = st.multiselect("Select Province(s)", list(province_dict.keys()), key="edit_provinces")
-        selected_codes = [province_dict[n] for n in selected_names]
+        options = ["-- Keep Current Area --"] + list(province_dict.keys())
+        selected_name = st.selectbox("Change Province (Optional)", options, key="edit_provinces")
+        if selected_name != "-- Keep Current Area --":
+            selected_code = province_dict[selected_name]
+
     else:
         creator_info = parse_workingarea(creator_area)
-        level = creator_info["level"]
-        province = creator_info["province"]
-        district = creator_info["district"]
-        division = creator_info["division"]
+        level, province, district, division = creator_info["level"], creator_info["province"], creator_info["district"], creator_info["division"]
 
-        # Province level -> select districts
         if level == 1:
-            districts = user_query(
-                "SELECT code,name FROM district WHERE LEFT(code,1)=%s ORDER BY name",
-                (province,),
-                fetch=True
-            )
-            district_dict = {r["name"]: r["code"] for r in districts}
-            selected_names = st.multiselect("Select District(s)", list(district_dict.keys()), key="edit_districts")
-            selected_codes = [district_dict[n] for n in selected_names]
+            districts = user_query("SELECT code,name FROM district WHERE LEFT(code,1)=%s ORDER BY name", (province,), fetch=True)
+            d_dict = {r["name"]: r["code"] for r in districts}
+            options = ["-- Keep Current Area --"] + list(d_dict.keys())
+            selected_name = st.selectbox("Change District (Optional)", options, key="edit_districts")
+            if selected_name != "-- Keep Current Area --":
+                selected_code = d_dict[selected_name]
 
-        # District level -> select divisions
         elif level == 2:
-            divisions = user_query(
-                "SELECT code,name FROM division WHERE LEFT(code,2)=%s ORDER BY name",
-                (district,),
-                fetch=True
-            )
-            division_dict = {r["name"]: r["code"] for r in divisions}
-            selected_names = st.multiselect("Select Division(s)", list(division_dict.keys()), key="edit_divisions")
-            selected_codes = [division_dict[n] for n in selected_names]
+            divisions = user_query("SELECT code,name FROM division WHERE LEFT(code,2)=%s ORDER BY name", (district,), fetch=True)
+            div_dict = {r["name"]: r["code"] for r in divisions}
+            options = ["-- Keep Current Area --"] + list(div_dict.keys())
+            selected_name = st.selectbox("Change Division (Optional)", options, key="edit_divisions")
+            if selected_name != "-- Keep Current Area --":
+                selected_code = div_dict[selected_name]
 
-        # Division level -> select GN divisions
         elif level == 4:
-            gns = user_query(
-                "SELECT code,name FROM gndivision WHERE LEFT(code,4)=%s ORDER BY name",
-                (division,),
-                fetch=True
-            )
+            gns = user_query("SELECT code,name FROM gndivision WHERE LEFT(code,4)=%s ORDER BY name", (division,), fetch=True)
             gn_dict = {r["name"]: r["code"] for r in gns}
-            selected_names = st.multiselect("Select GN Division(s)", list(gn_dict.keys()), key="edit_gns")
-            selected_codes = [gn_dict[n] for n in selected_names]
+            options = ["-- Keep Current Area --"] + list(gn_dict.keys())
+            selected_name = st.selectbox("Change GN Division (Optional)", options, key="edit_gns")
+            if selected_name != "-- Keep Current Area --":
+                selected_code = gn_dict[selected_name]
 
         else:
             st.warning("You cannot assign working areas below GN level")
@@ -149,9 +143,7 @@ def edit_user():
     # -----------------------------
     # UPDATE USER
     # -----------------------------
-    if st.button("Update User"):
-
-        # Update password if provided
+    if st.button("Update User", type="primary"):
         if password:
             if password != confirm:
                 st.error("Passwords do not match")
@@ -163,31 +155,15 @@ def edit_user():
             hashed = hash_password(password)
             user_query("UPDATE susouser SET password=%s WHERE login=%s", (hashed, login_search))
 
-        # Update working area
-        if selected_codes:
-            normalized_codes = normalize_workingarea(selected_codes)
-            workingarea = ",".join(normalized_codes)
+        if selected_code:
+            workingarea = "0000000" if selected_code == "0000000" else ",".join(normalize_workingarea([selected_code]))
         else:
             workingarea = user["workingarea"]
 
-        # Update all details
         user_query("""
             UPDATE susouser
-            SET fullname=%s,
-                email=%s,
-                phonenumber=%s,
-                workspace=%s,
-                workingarea=%s,
-                is_active=%s
+            SET fullname=%s, email=%s, phonenumber=%s, workspace=%s, workingarea=%s, is_active=%s
             WHERE login=%s
-        """, (
-            fullname,
-            email,
-            phone,
-            workspace,
-            workingarea,
-            bool(is_active),  # PostgreSQL boolean
-            login_search
-        ))
+        """, (fullname, email, phone, workspace, workingarea, bool(is_active), login_search))
 
-        st.success("User updated successfully")
+        st.success("✅ User updated successfully in local dashboard.")

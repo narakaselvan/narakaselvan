@@ -3,20 +3,15 @@ import bcrypt
 from acsl.db import run_query
 import psycopg2
 
-# Special login credentials
-SPECIAL_USER = "Kalaichelvan"
-SPECIAL_PASSWORD = "O4976|574d"
-
-
 def show_login():
 
     st.markdown(
-    """
-    <h1 style='text-align: center; color: darkgreen; font-size: 50px;'>
-        Economic Census 2025/26 (Agriculture)
-    </h1>
-    """,
-    unsafe_allow_html=True
+        """
+        <h1 style='text-align: center; color: darkgreen; font-size: 50px;'>
+            Economic Census 2025/26 (Agriculture)
+        </h1>
+        """,
+        unsafe_allow_html=True
     )
 
     with st.form("login_form"):
@@ -25,10 +20,11 @@ def show_login():
         submit = st.form_submit_button("Login")
 
     if submit:
-
         user = None
 
-        # Try normal database login
+        # -------------------------------
+        # Database Authentication
+        # -------------------------------
         try:
             result = run_query(
                 "SELECT * FROM susouser WHERE login=%s AND is_active='true'",
@@ -38,57 +34,49 @@ def show_login():
                 user = result[0]
 
         except psycopg2.errors.UndefinedTable:
-            st.warning("User table not found. Attempting special login...")
-
+            st.error("Authentication system unavailable (User table not found). Please contact the administrator.")
+            return
         except Exception as e:
             st.error(f"Database error: {e}")
             return
 
         # -------------------------------
-        # Normal login
+        # Credential Verification
         # -------------------------------
         if user:
             stored_password = user["password"]
+            
+            # Ensure the stored hash is in bytes for bcrypt
             if isinstance(stored_password, str):
-                stored_password = stored_password.encode()
+                stored_password = stored_password.encode('utf-8')
 
-            if not bcrypt.checkpw(password.encode(), stored_password):
+            # Verify the typed password against the hash
+            if not bcrypt.checkpw(password.encode('utf-8'), stored_password):
                 st.error("Invalid password")
                 return
 
+            # Login successful: Set session states
             st.session_state.logged_in = True
             st.session_state.user = user["login"]
             st.session_state.role = user["role"].lower()
             st.session_state.workingarea = user["workingarea"]
             st.session_state["login"] = username  # username from login form
 
-            st.success(f"Welcome {user['login']}")
+            st.success(f"Welcome {user['login']}!")
             st.rerun()
             return
 
         # -------------------------------
-        # Special login (plain text)
+        # Login failed (User not found or inactive)
         # -------------------------------
-        if username == SPECIAL_USER and password == SPECIAL_PASSWORD:
-            st.session_state.logged_in = True
-            st.session_state.user = SPECIAL_USER
-            st.session_state.role = "headquarters"
-            st.session_state.workingarea = "0000000"
+        st.error("User not found, inactive, or invalid credentials.")
 
-            st.success(f"Special login activated ({SPECIAL_USER})")
-            st.rerun()
-            return
-
-        # -------------------------------
-        # Login failed
-        # -------------------------------
-        st.error("User not found or invalid password")
-
+    # Footer
     st.markdown(
-    """
-    <h1 style='text-align: center; color: darkblue; font-size:14px;'>
-        Powered by: ICT Division, Department of Census and Statistics
-    </h1>
-    """,
-    unsafe_allow_html=True
-)
+        """
+        <h1 style='text-align: center; color: darkblue; font-size:14px;'>
+            Powered by: ICT Division, Department of Census and Statistics
+        </h1>
+        """,
+        unsafe_allow_html=True
+    )
