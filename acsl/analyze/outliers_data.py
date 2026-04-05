@@ -10,6 +10,48 @@ except ImportError:
     st.error("⚠️ Plotly is not installed. Please run `pip install plotly` in your terminal.")
     st.stop()
 
+# ==========================================
+# 1. NUMERIC VARIABLE DICTIONARY
+# Strictly limits analysis to numeric/continuous variables.
+# Categorical, Text, and Date strings are excluded.
+# ==========================================
+NUMERICAL_VARS = {
+    "Q1_5": "Eligibility of Holding", 
+    "Q2_1_5": "Age of the Holder", 
+    "Q2_1_10b": "Amount of other source of income",
+    "Q2_2_1a": "Males aged below 5", 
+    "Q2_2_1b": "Females aged below 5", 
+    "Q2_2_2a": "Males aged 5 to 14",
+    "Q2_2_2b": "Females aged 5 to 14", 
+    "Q2_2_3a": "Males aged more than 15", 
+    "Q2_2_3b": "Females aged more than 15",
+    "Q2_2_4a": "Total Males in Household", 
+    "Q2_2_4b": "Total Females in Household", 
+    "Q2_2_5": "Total adults aged 15+",
+    "Q2_3_3b": "Age of the household member", 
+    "Q2_3_6": "Months worked in cultivation year",
+    "Q2_3_7": "Weeks worked per month", 
+    "Q2_3_8": "Hours worked per week", 
+    "Q2_5_2d": "Age of the Manager",
+    "Q2_6_2a": "Male Employees", 
+    "Q2_6_2b": "Female Employees", 
+    "Q2_6_2c": "Total Employees",
+    "Q2_6_3a": "Days worked by Males", 
+    "Q2_6_3b": "Days worked by Females", 
+    "Q2_6_3c": "Days worked by All",
+    "Q2_7c": "Age of the selected person", 
+    "Q3_1": "No. of Land Parcels", 
+    "Q3_7_dec": "Parcel area in decimal acres",
+    "Q3_12": "Area owned and operated", 
+    "Q3_16": "Total holding area", 
+    "Q4_2d": "Greenhouse area (sq. ft)",
+    "MAHA": "Total area Maha season", 
+    "YALA": "Total area Yala season", 
+    "Q9_6": "Machinery owned count",
+    "Q10_2_1a": "Total number of permanent employees (Male)", 
+    "Q10_2_1b": "Total number of female permanent employees"
+}
+
 def show_outliers():
     st.markdown(
         """
@@ -23,51 +65,47 @@ def show_outliers():
     )
 
     # ==========================================
-    # 1. FETCH AVAILABLE COLUMNS
+    # 2. FETCH AVAILABLE COLUMNS
     # ==========================================
     @st.cache_data(show_spinner=False, ttl=300)
     def get_table_columns():
-        sql = """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'srilanka_agcensus2025';
-        """
+        sql = "SELECT column_name FROM information_schema.columns WHERE table_name = 'srilanka_agcensus2025';"
         conn = get_connection()
         try:
             df = pd.read_sql(sql, conn)
-            return sorted(df['column_name'].tolist())
+            return set(df['column_name'].tolist())
         except Exception as e:
             st.error(f"Error fetching columns: {e}")
-            return []
+            return set()
         finally:
             conn.close()
 
-    all_columns = get_table_columns()
+    db_columns = get_table_columns()
     
-    ignore_cols = ['interview__id', 'interview__key', 'assignment__id', 'responsible__name', 'sssys_irnd', 'has__errors']
-    
-    valid_cols = [
-        c for c in all_columns 
-        if c not in ignore_cols 
-        and "preload" not in c.lower()
-    ]
+    # Filter dictionary to only include numeric variables that actually exist in the database table right now
+    available_vars = {k: v for k, v in NUMERICAL_VARS.items() if k in db_columns}
 
-    if not valid_cols:
-        st.warning("No variables found in the survey table.")
+    if not available_vars:
+        st.warning("⚠️ No numeric variables found in the database. Ensure the table is populated.")
         return
 
-    # FIXED: Added key="outliers_var_select"
-    selected_var = st.selectbox(
-        "📊 Select a Variable to Analyze:", 
-        ["-- Select Variable --"] + valid_cols,
+    # Create descriptive options for the dropdown: e.g., "Age of the Holder (Q2_1_5)"
+    options = ["-- Select Variable --"] + [f"{v} ({k})" for k, v in available_vars.items()]
+
+    selected_label = st.selectbox(
+        "📊 Select a Numeric Variable to Analyze:", 
+        options,
         key="outliers_var_select"
     )
 
-    if selected_var == "-- Select Variable --":
+    if selected_label == "-- Select Variable --":
         return
 
+    # Extract the actual DB column name (key) from the dropdown selection
+    selected_var = selected_label.split("(")[-1].replace(")", "")
+
     # ==========================================
-    # 2. FETCH DATA & CALCULATE OUTLIERS
+    # 3. FETCH DATA & CALCULATE OUTLIERS
     # ==========================================
     with st.spinner(f"Calculating statistics and detecting outliers for {selected_var}..."):
         conn = get_connection()
@@ -80,12 +118,12 @@ def show_outliers():
         finally:
             conn.close()
 
-        # Force conversion to numeric
+        # Force conversion to numeric (safeguard against Postgres string casting)
         df_data['numeric_val'] = pd.to_numeric(df_data[selected_var], errors='coerce')
         df_clean = df_data.dropna(subset=['numeric_val']).copy()
 
         if df_clean.empty:
-            st.error(f"🚫 No valid numeric data found for `{selected_var}`.")
+            st.error(f"🚫 No valid numeric data found for `{selected_label}`.")
             return
 
         data_series = df_clean['numeric_val']
@@ -111,7 +149,7 @@ def show_outliers():
         df_outliers = df_outliers.sort_values(by='Deviation', ascending=False).drop(columns=['Deviation', selected_var, 'Is_Outlier'])
 
     # ==========================================
-    # 3. DISPLAY STATISTICS & GRAPHS
+    # 4. DISPLAY STATISTICS & GRAPHS
     # ==========================================
     col1, col2 = st.columns([1, 2])
 
@@ -150,7 +188,7 @@ def show_outliers():
         if not df_outliers.empty:
             st.markdown(f"### 🚨 Outlier Records ({len(df_outliers)})")
             st.info("These interviews reported values outside the expected statistical range.")
-            df_outliers.rename(columns={'numeric_val': f'Reported {selected_var}'}, inplace=True)
+            df_outliers.rename(columns={'numeric_val': f'Reported Value'}, inplace=True)
             st.dataframe(df_outliers, use_container_width=True, hide_index=True)
 
     # --- RIGHT COLUMN: GRAPHS ---
@@ -166,7 +204,7 @@ def show_outliers():
                 x="numeric_val", 
                 points="outliers", # Only show individual dots if they are outliers
                 hover_data=["interview__key"], # Show interview key when hovering over a dot!
-                labels={"numeric_val": selected_var}
+                labels={"numeric_val": selected_label}
             )
             fig_box.update_traces(marker=dict(color='#d9534f')) # Red outliers
             st.plotly_chart(fig_box, use_container_width=True)
@@ -175,13 +213,16 @@ def show_outliers():
         with graph_tabs[1]:
             st.markdown("##### Histogram & KDE Curve")
             if data_series.nunique() <= 1:
-                st.warning("Not enough variation in the data to plot a bell curve.")
+                st.warning("Not enough variation in the data to plot a distribution curve.")
             else:
                 try:
+                    # Dynamically turn off the Bell Curve if there are fewer than 10 interviews
+                    draw_curve = len(data_series) >= 10
+
                     fig_dist = ff.create_distplot(
                         hist_data=[data_series.tolist()], 
                         group_labels=[selected_var], 
-                        show_hist=True, show_curve=True, show_rug=False,
+                        show_hist=True, show_curve=draw_curve, show_rug=False,
                         colors=['#007bff']
                     )
                     
@@ -189,7 +230,12 @@ def show_outliers():
                     fig_dist.add_vline(x=lower_bound, line_dash="dash", line_color="red", annotation_text="Lower Bound")
                     fig_dist.add_vline(x=upper_bound, line_dash="dash", line_color="red", annotation_text="Upper Bound")
                     
-                    fig_dist.update_layout(showlegend=False, margin=dict(t=10, b=10, l=10, r=10))
+                    fig_dist.update_layout(
+                        title_text=f"Distribution of {selected_var}" if draw_curve else f"Histogram (Curve hidden due to low sample)",
+                        xaxis_title="Reported Value",
+                        showlegend=False, 
+                        margin=dict(t=40, b=10, l=10, r=10)
+                    )
                     st.plotly_chart(fig_dist, use_container_width=True)
                 except Exception as e:
                     st.error(f"Could not generate bell curve (data may be too skewed). Details: {e}")

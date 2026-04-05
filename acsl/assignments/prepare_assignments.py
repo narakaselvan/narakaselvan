@@ -3,8 +3,14 @@ import pandas as pd
 import os
 
 def prepare_assignments():
-
-    st.title("F3 Assignment File Generator")
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: maroon; font-size: 15px;'>
+        F3 Assignment File Generator
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
 
     # -------------------------------------------------
     # Create assignments directory

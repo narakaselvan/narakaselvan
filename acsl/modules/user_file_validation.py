@@ -5,7 +5,14 @@ import pandas as pd
 
 def user_file_validation():
 
-    st.title("Bulk User File Validator")
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: maroon; font-size: 15px;'>
+        Bulk User File Validator
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
 
     # -----------------------------------------------------
     # CONFIGURATION

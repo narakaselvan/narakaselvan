@@ -110,7 +110,14 @@ def download_assignments():
     # -------------------------
     # STREAMLIT UI
     # -------------------------
-    st.title("Bulk Assignments Exportor")
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: maroon; font-size: 15px;'>
+        Bulk Assignments Exportor
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
 
     st.warning("""
     ✔ Exports ALL assignment metadata  

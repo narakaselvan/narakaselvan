@@ -100,7 +100,15 @@ def upsert_dataframe(conn, table_name, df):
 
 def show_upload_interviews_to_local_DB():
 
-    st.title("📂 Interview TAB File Loader")
+    st.markdown(
+    """
+    <h1 style='text-align: center; color: maroon; font-size: 15px;'>
+        📂 Interview TAB File Loader
+    </h1>
+    """,
+    unsafe_allow_html=True
+    )
+
 
     # ------------------------------------------------
 
